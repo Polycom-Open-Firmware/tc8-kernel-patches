@@ -1,7 +1,7 @@
-From 05f281be90c90c6599af61fa26e6ea1618957e2d Mon Sep 17 00:00:00 2001
+From a5d373076de9f234009050bc99617bc832466c23 Mon Sep 17 00:00:00 2001
 From: TC8 Mainline Port <tc8@polycom-re.local>
 Date: Fri, 8 May 2026 19:53:12 +0000
-Subject: [PATCH 3/6] net: dsa: realtek: add RTL8363NB-VB switch support
+Subject: [PATCH 3/5] net: dsa: realtek: add RTL8363NB-VB switch support
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

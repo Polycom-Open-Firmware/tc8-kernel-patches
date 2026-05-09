@@ -1,7 +1,7 @@
-From 8c29b43b5bd60db72c36aeffb923f4973e6f9af7 Mon Sep 17 00:00:00 2001
+From 297d41b54c482c4c90c5bf9938f889575fcc13c9 Mon Sep 17 00:00:00 2001
 From: TC8 Mainline Port <tc8@polycom-re.local>
 Date: Fri, 8 May 2026 19:53:25 +0000
-Subject: [PATCH 4/6] net: fec: support fixed-phy DSA conduit on TC8
+Subject: [PATCH 4/5] net: fec: support fixed-phy DSA conduit on TC8
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

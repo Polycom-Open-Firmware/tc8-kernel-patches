@@ -1,7 +1,7 @@
-From 4c2a47f47e74768e37be547911cf5f171dbc7d6a Mon Sep 17 00:00:00 2001
+From d4ac13e59f7d0dc9d23970013fb98ab8d97902fb Mon Sep 17 00:00:00 2001
 From: TC8 Mainline Port <tc8@polycom-re.local>
 Date: Fri, 8 May 2026 19:52:49 +0000
-Subject: [PATCH 1/6] arm64: dts: freescale: add imx8mm-tc8 board support
+Subject: [PATCH 1/5] arm64: dts: freescale: add imx8mm-tc8 board support
 
 Add a device-tree for the Polycom TC8 panel (codename LCC), a wall-
 mounted touch panel based on the i.MX 8M Mini SoC.
@@ -20,8 +20,8 @@ TC8 platform. Touch input is wired but not yet enabled by default
 pending an upstreamable goodix-style binding cleanup.
 ---
  arch/arm64/boot/dts/freescale/Makefile       |   1 +
- arch/arm64/boot/dts/freescale/imx8mm-tc8.dts | 471 +++++++++++++++++++
- 2 files changed, 472 insertions(+)
+ arch/arm64/boot/dts/freescale/imx8mm-tc8.dts | 469 +++++++++++++++++++
+ 2 files changed, 470 insertions(+)
  create mode 100644 arch/arm64/boot/dts/freescale/imx8mm-tc8.dts
 
 diff --git a/arch/arm64/boot/dts/freescale/Makefile b/arch/arm64/boot/dts/freescale/Makefile
@@ -38,10 +38,10 @@ index 89aee6c92..f78cfe25a 100644
  dtb-$(CONFIG_ARCH_MXC) += imx8mm-icore-mx8mm-edimm2.2.dtb
 diff --git a/arch/arm64/boot/dts/freescale/imx8mm-tc8.dts b/arch/arm64/boot/dts/freescale/imx8mm-tc8.dts
 new file mode 100644
-index 000000000..223eb0a94
+index 000000000..4ce5e6d1d
 --- /dev/null
 +++ b/arch/arm64/boot/dts/freescale/imx8mm-tc8.dts
-@@ -0,0 +1,471 @@
+@@ -0,0 +1,469 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +// Polycom TC8 (POLY LCC PROTO) — incremental DT on top of EVK base
 +/dts-v1/;
@@ -178,18 +178,16 @@ index 000000000..223eb0a94
 +
 +	touchscreen@5d {
 +		compatible = "goodix,gt9271";
-+		reg = <0x5d>;	/* default GT9xx address when INT is HIGH at reset */
++		reg = <0x5d>;
 +		pinctrl-names = "default";
 +		pinctrl-0 = <&pinctrl_touch>;
 +		interrupt-parent = <&gpio1>;
 +		interrupts = <9 IRQ_TYPE_EDGE_FALLING>;
 +		irq-gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;
-+		/* No reset-gpios — stock keeps it as INPUT, only reads value.
-+		 * Pulsing it LOW kills the chip on TC8. */
-+		/* Touch power comes from the panel driver holding reset deasserted */
++		reset-gpios = <&gpio2 3 GPIO_ACTIVE_LOW>;
 +		touchscreen-size-x = <800>;
 +		touchscreen-size-y = <1280>;
-+	status = "okay";
++		status = "okay";
 +	};
 +
 +	/* On-board EEPROMs (board ID + cert?). Stock has them as 1-0050,

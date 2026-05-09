@@ -1,7 +1,7 @@
-From 71aee6cd1367256b2cae13a4d83337419d40ac8c Mon Sep 17 00:00:00 2001
+From 93bc5e8fa6eeeb1baecfbef740b914e443ff995a Mon Sep 17 00:00:00 2001
 From: TC8 Mainline Port <tc8@polycom-re.local>
 Date: Fri, 8 May 2026 19:52:57 +0000
-Subject: [PATCH 2/6] drm/panel: add Polycom TC8 LCC MIPI-DSI panel driver
+Subject: [PATCH 2/5] drm/panel: add Polycom TC8 LCC MIPI-DSI panel driver
 
 The Polycom TC8 panel ships with a custom POLY LCC PROTO MIPI-DSI
 display module (Raydium-class controller, 800x1280 @ 60 Hz, 4 lanes).
@@ -19,8 +19,8 @@ Compatible: poly,lcc-proto
 ---
  drivers/gpu/drm/panel/Kconfig          |   9 +
  drivers/gpu/drm/panel/Makefile         |   1 +
- drivers/gpu/drm/panel/panel-poly-lcc.c | 357 +++++++++++++++++++++++++
- 3 files changed, 367 insertions(+)
+ drivers/gpu/drm/panel/panel-poly-lcc.c | 356 +++++++++++++++++++++++++
+ 3 files changed, 366 insertions(+)
  create mode 100644 drivers/gpu/drm/panel/panel-poly-lcc.c
 
 diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
@@ -57,10 +57,10 @@ index 433e93d57..dd7e3d05c 100644
  obj-$(CONFIG_DRM_PANEL_SAMSUNG_DB7430) += panel-samsung-db7430.o
 diff --git a/drivers/gpu/drm/panel/panel-poly-lcc.c b/drivers/gpu/drm/panel/panel-poly-lcc.c
 new file mode 100644
-index 000000000..efc842cc9
+index 000000000..69abe63c8
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/panel-poly-lcc.c
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,356 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Copyright (C) STMicroelectronics SA 2017
@@ -209,9 +209,7 @@ index 000000000..efc842cc9
 +
 +static void poly_lcc_init_sequence(struct poly_lcc *ctx)
 +{
-+	/* Init disabled — DSI host not yet up during prepare(); commands
-+	 * fail with -EINVAL. TODO: move to enable() or use samsung-dsim init
-+	 * complete callback. */
++	/* no-op: rotation handled by userspace compositor */
 +}
 +
 +static int poly_lcc_disable(struct drm_panel *panel)
@@ -325,6 +323,7 @@ index 000000000..efc842cc9
 +
 +	connector->display_info.width_mm = mode->width_mm;
 +	connector->display_info.height_mm = mode->height_mm;
++
 +
 +	return 1;
 +}

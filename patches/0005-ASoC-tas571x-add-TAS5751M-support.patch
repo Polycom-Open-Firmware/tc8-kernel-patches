@@ -1,7 +1,7 @@
-From 32363a07e015a4a692627cf1a3a066065085030e Mon Sep 17 00:00:00 2001
+From 53c43489bd532a643f9d3eb386b32dc4f86bf2f4 Mon Sep 17 00:00:00 2001
 From: TC8 Mainline Port <tc8@polycom-re.local>
 Date: Fri, 8 May 2026 19:53:39 +0000
-Subject: [PATCH 5/6] ASoC: tas571x: add TAS5751M support
+Subject: [PATCH 5/5] ASoC: tas571x: add TAS5751M support
 
 The TAS5751M is a 2.1 closed-loop class-D amplifier used on the
 Polycom TC8 panel.  It is broadly register-compatible with the
