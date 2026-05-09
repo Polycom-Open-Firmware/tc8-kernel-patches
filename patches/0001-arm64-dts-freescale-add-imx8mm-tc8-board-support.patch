@@ -1,0 +1,518 @@
+From 4c2a47f47e74768e37be547911cf5f171dbc7d6a Mon Sep 17 00:00:00 2001
+From: TC8 Mainline Port <tc8@polycom-re.local>
+Date: Fri, 8 May 2026 19:52:49 +0000
+Subject: [PATCH 1/6] arm64: dts: freescale: add imx8mm-tc8 board support
+
+Add a device-tree for the Polycom TC8 panel (codename LCC), a wall-
+mounted touch panel based on the i.MX 8M Mini SoC.
+
+Hardware described:
+  - i.MX 8M Mini quad Cortex-A53 + 16 GB eMMC
+  - FEC1 attached via RGMII fixed-link to a Realtek RTL8363NB-VB
+    DSA switch (single user port + CPU port + uplink)
+  - TAS5751M 2.1 amplifier on I2C, fed by SAI3 in I2S/24-bit mode
+  - GT9xx capacitive touch on I2C (driver still being upstreamed)
+  - POLY LCC PROTO MIPI-DSI panel (800x1280, 4 lanes)
+  - eMMC + WDOG + standard i.MX peripheral routing
+
+This is the minimum-viable DT used to bring up mainline Linux on the
+TC8 platform. Touch input is wired but not yet enabled by default
+pending an upstreamable goodix-style binding cleanup.
+---
+ arch/arm64/boot/dts/freescale/Makefile       |   1 +
+ arch/arm64/boot/dts/freescale/imx8mm-tc8.dts | 471 +++++++++++++++++++
+ 2 files changed, 472 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/freescale/imx8mm-tc8.dts
+
+diff --git a/arch/arm64/boot/dts/freescale/Makefile b/arch/arm64/boot/dts/freescale/Makefile
+index 89aee6c92..f78cfe25a 100644
+--- a/arch/arm64/boot/dts/freescale/Makefile
++++ b/arch/arm64/boot/dts/freescale/Makefile
+@@ -56,6 +56,7 @@ dtb-$(CONFIG_ARCH_MXC) += imx8mm-ddr4-evk.dtb
+ dtb-$(CONFIG_ARCH_MXC) += imx8mm-emcon-avari.dtb
+ dtb-$(CONFIG_ARCH_MXC) += imx8mm-emtop-baseboard.dtb
+ dtb-$(CONFIG_ARCH_MXC) += imx8mm-evk.dtb
++dtb-$(CONFIG_ARCH_MXC) += imx8mm-tc8.dtb
+ dtb-$(CONFIG_ARCH_MXC) += imx8mm-evkb.dtb
+ dtb-$(CONFIG_ARCH_MXC) += imx8mm-icore-mx8mm-ctouch2.dtb
+ dtb-$(CONFIG_ARCH_MXC) += imx8mm-icore-mx8mm-edimm2.2.dtb
+diff --git a/arch/arm64/boot/dts/freescale/imx8mm-tc8.dts b/arch/arm64/boot/dts/freescale/imx8mm-tc8.dts
+new file mode 100644
+index 000000000..223eb0a94
+--- /dev/null
++++ b/arch/arm64/boot/dts/freescale/imx8mm-tc8.dts
+@@ -0,0 +1,471 @@
++// SPDX-License-Identifier: GPL-2.0+
++// Polycom TC8 (POLY LCC PROTO) — incremental DT on top of EVK base
++/dts-v1/;
++
++#include <dt-bindings/usb/pd.h>
++#include "imx8mm-evk.dtsi"
++
++/ {
++	model = "Polycom TC8 (LCC PROTO)";
++	compatible = "poly,tc8", "fsl,imx8mm-evk", "fsl,imx8mm";
++
++	chosen {
++		bootargs = "";
++		stdout-path = &uart2;
++	};
++
++	/* (Was a reg_panel_pwr regulator-fixed driving gpio2/5 HI. Now removed —
++	 * the panel driver itself owns that GPIO via reset-gpios. Keep gpio2/5
++	 * pulsed/held by panel-poly-lcc. Touch power continues because the
++	 * panel driver holds reset deasserted in the prepared state.) */
++
++	/* Stock kernel drives gpio2 pin 6 HI ("BT power enable") at boot.
++	 * Name is suspect — may also gate other rails. Driving HI to match
++	 * stock and see if it affects i2c-1 chip visibility. */
++	reg_bt_pwr: regulator-bt-pwr {
++		compatible = "regulator-fixed";
++		regulator-name = "BT_PWREN";
++		gpio = <&gpio2 6 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++		regulator-always-on;
++		regulator-boot-on;
++	};
++
++	/* gpio3 pin 25 = TAS5751 reset in stock DT (out hi = chip out of reset).
++	 * Not on i2c-1 but driving it for parity with stock. */
++	reg_tas_pwr: regulator-tas-pwr {
++		compatible = "regulator-fixed";
++		regulator-name = "TAS_RST";
++		gpio = <&gpio3 25 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++		regulator-always-on;
++		regulator-boot-on;
++	};
++
++	/* gpio5 pin 2 = switch reset — owned by DSA driver below */
++
++	/* TCA6416 pin 1 = EXT_PWREN — gates audio sub-board AVDD/DVDD
++	 * (feeds AK4458/AK4497/AK5558). Stock has 300ms startup delay. */
++	reg_audio_board: regulator-audio-board {
++		compatible = "regulator-fixed";
++		regulator-name = "EXT_PWREN";
++		gpio = <&pca6416 1 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++		regulator-always-on;
++		regulator-boot-on;
++		startup-delay-us = <300000>;
++	};
++};
++
++/* TC8 differences vs EVK */
++
++/* PMIC: TC8 is bd71837 vs EVK's bd71847. BD71837 has bucks 1-8 with
++ * different voltage roles: BUCK1-4 are CPU/DRAM (700-1300mV), BUCK5 is
++ * 700-1350mV, BUCK6 is the 3V3 supply, BUCK7 is the 1V8 supply, BUCK8
++ * is core (800-1400mV). Override EVK's BD71847-shaped regulators. */
++&i2c1 {
++	pmic@4b {
++		compatible = "rohm,bd71837";
++
++		regulators {
++			/* override to match BD71837's actual BUCK4 (CPU supply, 0.7-1.3V) */
++			BUCK4 {
++				regulator-name = "buck4";
++				regulator-min-microvolt = <700000>;
++				regulator-max-microvolt = <1300000>;
++				regulator-boot-on;
++				regulator-always-on;
++			};
++
++			/* BD71837 BUCK5: 0.7-1.35V (was 1.605-1.995V on BD71847) */
++			BUCK5 {
++				regulator-name = "buck5";
++				regulator-min-microvolt = <700000>;
++				regulator-max-microvolt = <1350000>;
++				regulator-boot-on;
++				regulator-always-on;
++			};
++
++			/* BD71837 BUCK6: 3.0-3.3V (this is the 3V3 supply on BD71837;
++			 * EVK had this role on BUCK4 of BD71847) */
++			BUCK6 {
++				regulator-name = "buck6";
++				regulator-min-microvolt = <3000000>;
++				regulator-max-microvolt = <3300000>;
++				regulator-boot-on;
++				regulator-always-on;
++			};
++
++			BUCK7 {
++				regulator-name = "buck7";
++				regulator-min-microvolt = <1605000>;
++				regulator-max-microvolt = <1995000>;
++				regulator-boot-on;
++				regulator-always-on;
++			};
++
++			BUCK8 {
++				regulator-name = "buck8";
++				regulator-min-microvolt = <800000>;
++				regulator-max-microvolt = <1400000>;
++				regulator-boot-on;
++				regulator-always-on;
++			};
++		};
++	};
++};
++
++/* No HDMI on TC8 */
++&i2c2 {
++	hdmi@3d {
++		status = "disabled";
++	};
++};
++
++/* No USB-C controller */
++&ptn5110 { status = "disabled"; };
++
++/* Goodix touch is on i2c@30a30000 = mainline &i2c2, NOT &i2c3.
++ * Stock /sys/class/i2c-adapter shows: i2c-1=30a30000 with goodix@14 +
++ * 2 EEPROMs; i2c-2=30a40000 with audio chips and OV5640. */
++&i2c2 {
++	clock-frequency = <100000>;	/* stock TC8 default */
++	status = "okay";
++
++	touchscreen@5d {
++		compatible = "goodix,gt9271";
++		reg = <0x5d>;	/* default GT9xx address when INT is HIGH at reset */
++		pinctrl-names = "default";
++		pinctrl-0 = <&pinctrl_touch>;
++		interrupt-parent = <&gpio1>;
++		interrupts = <9 IRQ_TYPE_EDGE_FALLING>;
++		irq-gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;
++		/* No reset-gpios — stock keeps it as INPUT, only reads value.
++		 * Pulsing it LOW kills the chip on TC8. */
++		/* Touch power comes from the panel driver holding reset deasserted */
++		touchscreen-size-x = <800>;
++		touchscreen-size-y = <1280>;
++	status = "okay";
++	};
++
++	/* On-board EEPROMs (board ID + cert?). Stock has them as 1-0050,
++	 * 1-0052. Try at24c64 binding — real type/size unknown until we
++	 * can read them. */
++	eeprom@50 {
++		compatible = "atmel,24c64";
++		reg = <0x50>;
++		pagesize = <32>;
++	};
++
++	eeprom@52 {
++		compatible = "atmel,24c64";
++		reg = <0x52>;
++		pagesize = <32>;
++	};
++};
++
++/* TC8's audio + camera bus is i2c@30a40000 = mainline &i2c3.
++ * EVK has its adv7535 + ptn5110 here (already disabled above). */
++
++/* Pinmux for Goodix touch — replicate stock touch_iogrp:
++ *   GPIO1_IO9 (IRQ) at mux_reg 0x4c, ALT0 GPIO, pad cfg 0x19
++ *   GPIO2_IO3 (RESET) at mux_reg 0xac, ALT5 GPIO, pad cfg 0x16
++ */
++&iomuxc {
++	pinctrl_touch: touchgrp {
++		fsl,pins = <
++			0x4c 0x2b4 0 0 0 0x19	/* GPIO1_IO9 → GPIO1_IO9 */
++			0xac 0x314 0 5 0 0x16	/* GPIO2_IO3 → GPIO2_IO3 (ALT5) */
++		>;
++	};
++
++};
++
++/* No WM8524 audio on TC8 — uses TLV320AIC3106 instead (TBD wire-up) */
++&wm8524 { status = "disabled"; };
++
++/* TC8 uses PWM4 (GPIO1_IO15) for panel backlight, not EVK's PWM1.
++ * Override the EVK backlight to use the right PWM + matching period
++ * (stock used 25us = 40kHz). */
++&backlight {
++	pwms = <&pwm4 0 25000 0>;
++	/* pinctrl is owned by the &pwm4 controller, not the backlight node. */
++};
++
++&pwm1 { status = "disabled"; };
++&pwm4 {
++	status = "okay";
++	pinctrl-names = "default";
++	pinctrl-0 = <&pinctrl_pwm4>;
++};
++
++/* TC8 doesn't have an SD card on USDHC2. Disable to release pin
++ * conflicts (its pinctrl includes GPIO1_IO15 which we use for PWM4). */
++&usdhc2 { status = "disabled"; };
++&reg_usdhc2_vmmc { status = "disabled"; };
++
++/* TC8's eMMC sits on USDHC3, 8-bit, non-removable. EVK leaves &usdhc3 off. */
++&usdhc3 {
++	pinctrl-names = "default", "state_100mhz", "state_200mhz";
++	pinctrl-0 = <&pinctrl_usdhc3>;
++	pinctrl-1 = <&pinctrl_usdhc3_100mhz>;
++	pinctrl-2 = <&pinctrl_usdhc3_200mhz>;
++	bus-width = <8>;
++	non-removable;
++	status = "okay";
++};
++
++&iomuxc {
++	pinctrl_usdhc3: usdhc3grp {
++		fsl,pins = <
++			0x138 0x3a0 0 0x12 0 0x190
++			0x13c 0x3a4 0 0x02 0 0x1d0
++			0x11c 0x384 0 0x02 0 0x1d0
++			0x120 0x388 0 0x02 0 0x1d0
++			0x124 0x38c 0 0x02 0 0x1d0
++			0x128 0x390 0 0x02 0 0x1d0
++			0x130 0x398 0 0x02 0 0x1d0
++			0x100 0x368 0 0x02 0 0x1d0
++			0x104 0x36c 0 0x02 0 0x1d0
++			0x108 0x370 0 0x02 0 0x1d0
++			0xfc  0x364 0 0x02 0 0x190
++		>;
++	};
++	pinctrl_usdhc3_100mhz: usdhc3grp100mhz {
++		fsl,pins = <
++			0x138 0x3a0 0 0x12 0 0x194
++			0x13c 0x3a4 0 0x02 0 0x1d4
++			0x11c 0x384 0 0x02 0 0x1d4
++			0x120 0x388 0 0x02 0 0x1d4
++			0x124 0x38c 0 0x02 0 0x1d4
++			0x128 0x390 0 0x02 0 0x1d4
++			0x130 0x398 0 0x02 0 0x1d4
++			0x100 0x368 0 0x02 0 0x1d4
++			0x104 0x36c 0 0x02 0 0x1d4
++			0x108 0x370 0 0x02 0 0x1d4
++			0xfc  0x364 0 0x02 0 0x194
++		>;
++	};
++	pinctrl_usdhc3_200mhz: usdhc3grp200mhz {
++		fsl,pins = <
++			0x138 0x3a0 0 0x12 0 0x196
++			0x13c 0x3a4 0 0x02 0 0x1d6
++			0x11c 0x384 0 0x02 0 0x1d6
++			0x120 0x388 0 0x02 0 0x1d6
++			0x124 0x38c 0 0x02 0 0x1d6
++			0x128 0x390 0 0x02 0 0x1d6
++			0x130 0x398 0 0x02 0 0x1d6
++			0x100 0x368 0 0x02 0 0x1d6
++			0x104 0x36c 0 0x02 0 0x1d6
++			0x108 0x370 0 0x02 0 0x1d6
++			0xfc  0x364 0 0x02 0 0x196
++		>;
++	};
++};
++
++&iomuxc {
++	pinctrl_pwm4: pwm4grp {
++		fsl,pins = <
++			0x64 0x2cc 0 5 0 0x10	/* GPIO1_IO15 → PWM4_OUT (ALT5) */
++		>;
++	};
++};
++
++/* MIPI-DSI: replace EVK's adv7535 endpoint with our LCC panel.
++ * The Samsung DSIM IP in i.MX8MM drives a 4-lane DSI link to a
++ * Raydium-class LCD with our custom panel-poly-lcc driver. */
++&mipi_dsi {
++	samsung,esc-clock-frequency = <10000000>;
++	status = "okay";
++
++	#address-cells = <1>;
++	#size-cells = <0>;
++
++	panel@0 {
++		compatible = "poly,lcc-proto";
++		reg = <0>;
++		reset-gpios = <&gpio2 5 GPIO_ACTIVE_LOW>;
++		/* No power-supply: driver's optional regulator gets a dummy. */
++		dsi-lanes = <4>;
++		backlight = <&backlight>;
++	status = "okay";
++	};
++};
++
++&lcdif {
++	status = "okay";
++};
++
++/* FEC: TC8 has a Realtek RTL8363NB-VB switch IC instead of a regular PHY.
++ * Mainline doesn't drive it. Bypass the MDIO+PHY path with a fixed-link
++ * so the kernel treats the switch's CPU-port as a always-on 1Gb partner. */
++&fec1 {
++	/* RTL8363NB-VB switch on FEC's hardware MDIO bus.
++	 * STOCK BINARY confirms MDIO address is 29 (0x1d), not 30!
++	 * (DT reg field in stock said 0x1e but vendor driver hardcodes 0x1d.)
++	 *
++	 * mainline realtek-mdio uses DT 'reg' as priv->mdio_addr directly. */
++	/delete-property/ phy-handle;
++	phy-mode = "rgmii-id";
++	fsl,num-tx-queues = <1>;
++	fsl,num-rx-queues = <1>;
++	fixed-link {
++		speed = <1000>;
++		full-duplex;
++	};
++
++	mdio {
++		#address-cells = <1>;
++		#size-cells = <0>;
++				/delete-node/ ethernet-phy@0;
++
++		switch@29 {
++			compatible = "realtek,rtl8365mb";
++			reg = <29>;
++			reset-gpios = <&gpio5 2 GPIO_ACTIVE_LOW>;
++
++			ports {
++				#address-cells = <1>;
++				#size-cells = <0>;
++
++				port@1 {
++					reg = <1>;
++					label = "lan";
++					phy-mode = "internal";
++					fixed-link {
++						speed = <1000>;
++						full-duplex;
++					};
++				};
++
++				port@6 {
++					reg = <6>;
++					label = "cpu";
++					ethernet = <&fec1>;
++					phy-mode = "rgmii-id";
++					fixed-link {
++						speed = <1000>;
++						full-duplex;
++					};
++				};
++			};
++		};
++	};
++};
++
++
++/* TC8 PCB needs RGMII delays applied opposite of EVK:
++ * stock has TXC/TX_CTL=0x91 (delayed) and RXC/RX_CTL=0x1f (no delay).
++ * Mainline EVK pinctrl_fec1 inverts this — fix it. */
++&iomuxc {
++	/delete-node/ fec1grp;
++	pinctrl_fec1: fec1grp {
++		fsl,pins = <
++			MX8MM_IOMUXC_ENET_MDC_ENET1_MDC			0x3
++			MX8MM_IOMUXC_ENET_MDIO_ENET1_MDIO		0x3
++			MX8MM_IOMUXC_ENET_TD3_ENET1_RGMII_TD3		0x1f
++			MX8MM_IOMUXC_ENET_TD2_ENET1_RGMII_TD2		0x1f
++			MX8MM_IOMUXC_ENET_TD1_ENET1_RGMII_TD1		0x1f
++			MX8MM_IOMUXC_ENET_TD0_ENET1_RGMII_TD0		0x1f
++			MX8MM_IOMUXC_ENET_RD3_ENET1_RGMII_RD3		0x91
++			MX8MM_IOMUXC_ENET_RD2_ENET1_RGMII_RD2		0x91
++			MX8MM_IOMUXC_ENET_RD1_ENET1_RGMII_RD1		0x91
++			MX8MM_IOMUXC_ENET_RD0_ENET1_RGMII_RD0		0x91
++			MX8MM_IOMUXC_ENET_TXC_ENET1_RGMII_TXC		0x91
++			MX8MM_IOMUXC_ENET_RXC_ENET1_RGMII_RXC		0x1f
++			MX8MM_IOMUXC_ENET_RX_CTL_ENET1_RGMII_RX_CTL	0x1f
++			MX8MM_IOMUXC_ENET_TX_CTL_ENET1_RGMII_TX_CTL	0x91
++		>;
++	};
++};
++
++/* TC8: stock kernel uses ENET_REF parent SYS_PLL2_125M directly (MUX=0).
++ * Mainline imx8mm.dtsi uses different parent (MUX=1). Override to match stock. */
++&fec1 {
++	assigned-clock-parents = <&clk IMX8MM_SYS_PLL1_266M>,
++				 <&clk IMX8MM_SYS_PLL2_100M>,
++				 <&clk IMX8MM_SYS_PLL2_125M>,
++				 <&clk IMX8MM_SYS_PLL2_50M>;
++};
++
++/* Free SAI3_MCLK pad so it can be used as GPIO5_IO2 for switch reset */
++&sai3 {
++	status = "disabled";
++};
++
++&iomuxc {
++	pinctrl_eth_rst: ethrstgrp {
++		fsl,pins = <
++			MX8MM_IOMUXC_SAI3_MCLK_GPIO5_IO2  0x19
++		>;
++	};
++};
++
++&fec1 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&pinctrl_fec1 &pinctrl_eth_rst>;
++};
++
++/* TC8 audio: SAI1 → TAS5751 (Class-D amp) → speakers/headset.
++ * Stock used a TAS5751 on i2c-2 (mainline i2c3) at 0x2b. Reset is
++ * gpio3_25 (already deasserted by reg_tas_pwr regulator above).
++ *
++ * Stock pinmux for SAI1 used TX-side I2S (TXFS/TXC/TXD0) + MCLK out.
++ * Mainline EVK has no pinctrl_sai1, so we define one matching stock. */
++&i2c3 {
++	tas5751: codec@2b {
++		compatible = "ti,tas5751";
++		reg = <0x2b>;
++		#sound-dai-cells = <0>;
++		/* reset is owned by reg_tas_pwr regulator-fixed (gpio3_25),
++		 * driven HIGH at boot. No reset-gpios property here. */
++	status = "okay";
++	};
++};
++
++&sai1 {
++	pinctrl-names = "default";
++	pinctrl-0 = <&pinctrl_sai1>;
++	assigned-clocks = <&clk IMX8MM_CLK_SAI1>;
++	assigned-clock-parents = <&clk IMX8MM_AUDIO_PLL1_OUT>;
++	assigned-clock-rates = <24576000>;
++	fsl,sai-mclk-direction-output;
++	status = "okay";
++};
++
++/ {
++	sound-tas5751 {
++		compatible = "simple-audio-card";
++		simple-audio-card,name = "tas5751-audio";
++		simple-audio-card,format = "i2s";
++		simple-audio-card,frame-master = <&sai1_cpudai>;
++		simple-audio-card,bitclock-master = <&sai1_cpudai>;
++		simple-audio-card,widgets =
++			"Speaker", "Speakers";
++		simple-audio-card,routing =
++			"Speakers", "OUT_A",
++			"Speakers", "OUT_B";
++
++		sai1_cpudai: simple-audio-card,cpu {
++			sound-dai = <&sai1>;
++			dai-tdm-slot-num = <2>;
++			/* slot-width 32 → 16 to match S16_LE */
++			dai-tdm-slot-width = <16>;
++		};
++
++		simple-audio-card,codec {
++			sound-dai = <&tas5751>;
++		};
++	};
++};
++
++&iomuxc {
++	pinctrl_sai1: sai1grp {
++		fsl,pins = <
++			MX8MM_IOMUXC_SAI1_MCLK_SAI1_MCLK    0xd6
++			MX8MM_IOMUXC_SAI1_TXFS_SAI1_TX_SYNC 0xd6
++			MX8MM_IOMUXC_SAI1_TXC_SAI1_TX_BCLK  0xd6
++			MX8MM_IOMUXC_SAI1_TXD0_SAI1_TX_DATA0 0xd6
++		>;
++	};
++};
+-- 
+2.43.0
+

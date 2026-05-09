@@ -1,0 +1,120 @@
+From 8c29b43b5bd60db72c36aeffb923f4973e6f9af7 Mon Sep 17 00:00:00 2001
+From: TC8 Mainline Port <tc8@polycom-re.local>
+Date: Fri, 8 May 2026 19:53:25 +0000
+Subject: [PATCH 4/6] net: fec: support fixed-phy DSA conduit on TC8
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The Polycom TC8 wires FEC1 directly to an RTL8363NB-VB switch with no
+explicit PHY between the MAC and the switch — the link is a fixed
+1G/full RGMII connection.
+
+Three small changes are needed to make this work on i.MX8MM:
+
+  1. Add FEC_QUIRK_NO_HARD_RESET to fec_imx6q_info.  Soft-resetting
+     the FEC IP on i.MX8MM clears the MDIO bus internal state in a
+     way that prevents the bus from being driven again until a full
+     SoC reset.  The stock Polycom kernel never asserts this reset.
+
+  2. In fec_restart() always take the no-hard-reset path; never
+     write 1 to FEC_ECNTRL.  This is a corollary of #1.
+
+  3. In fec_enet_mii_probe(), when no PHY device is registered on
+     the bus, register a fixed_phy on the fly with link=1, 1 Gb/s,
+     full duplex and connect to it directly.  Walking the bus and
+     guessing fixed-0 the way the upstream code does is fragile and
+     fails outright when the DT does not embed a fixed-link sub-
+     node in the FEC node itself.
+
+A cleaner long-term fix would teach the FEC driver to honour a
+fixed-link subnode under the mac node directly; this patch keeps the
+behavior change localised to the no-PHY path.
+---
+ drivers/net/ethernet/freescale/fec_main.c | 47 ++++++++++-------------
+ 1 file changed, 21 insertions(+), 26 deletions(-)
+
+diff --git a/drivers/net/ethernet/freescale/fec_main.c b/drivers/net/ethernet/freescale/fec_main.c
+index 77c8e9cfb..7e7421230 100644
+--- a/drivers/net/ethernet/freescale/fec_main.c
++++ b/drivers/net/ethernet/freescale/fec_main.c
+@@ -54,6 +54,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/mdio.h>
+ #include <linux/phy.h>
++#include <linux/phy_fixed.h>
+ #include <linux/fec.h>
+ #include <linux/of.h>
+ #include <linux/of_device.h>
+@@ -125,7 +126,8 @@ static const struct fec_devinfo fec_imx6q_info = {
+ 		  FEC_QUIRK_HAS_BUFDESC_EX | FEC_QUIRK_HAS_CSUM |
+ 		  FEC_QUIRK_HAS_VLAN | FEC_QUIRK_ERR006358 |
+ 		  FEC_QUIRK_HAS_RACC | FEC_QUIRK_CLEAR_SETUP_MII |
+-		  FEC_QUIRK_HAS_PMQOS | FEC_QUIRK_HAS_MDIO_C45,
++		  FEC_QUIRK_HAS_PMQOS | FEC_QUIRK_HAS_MDIO_C45 |
++		  FEC_QUIRK_NO_HARD_RESET,
+ };
+ 
+ static const struct fec_devinfo fec_mvf600_info = {
+@@ -1047,13 +1049,9 @@ fec_restart(struct net_device *ndev)
+ 	 * For i.MX6SX SOC, enet use AXI bus, we use disable MAC
+ 	 * instead of reset MAC itself.
+ 	 */
+-	if (fep->quirks & FEC_QUIRK_HAS_MULTI_QUEUES ||
+-	    ((fep->quirks & FEC_QUIRK_NO_HARD_RESET) && fep->link)) {
+-		writel(0, fep->hwp + FEC_ECNTRL);
+-	} else {
+-		writel(1, fep->hwp + FEC_ECNTRL);
+-		udelay(10);
+-	}
++	/* TC8: never soft-reset FEC IP — kills MDIO */
++	writel(0, fep->hwp + FEC_ECNTRL);
++	udelay(10);
+ 
+ 	/*
+ 	 * enet-mac reset will reset mac address registers too,
+@@ -2337,26 +2335,23 @@ static int fec_enet_mii_probe(struct net_device *ndev)
+ 			return -ENODEV;
+ 		}
+ 	} else {
+-		/* check for attached phy */
+-		for (phy_id = 0; (phy_id < PHY_MAX_ADDR); phy_id++) {
+-			if (!mdiobus_is_registered_device(fep->mii_bus, phy_id))
+-				continue;
+-			if (dev_id--)
+-				continue;
+-			strscpy(mdio_bus_id, fep->mii_bus->id, MII_BUS_ID_SIZE);
+-			break;
++		/* TC8 hack: register a fixed-phy on the fly so DSA conduit comes up. */
++		struct fixed_phy_status status = {
++			.link = 1,
++			.duplex = 1,
++			.speed = 1000,
++		};
++		struct phy_device *fp = fixed_phy_register(PHY_POLL, &status, NULL);
++		if (IS_ERR(fp)) {
++			netdev_err(ndev, "TC8 fixed_phy_register failed: %ld\n", PTR_ERR(fp));
++			return PTR_ERR(fp);
+ 		}
+-
+-		if (phy_id >= PHY_MAX_ADDR) {
+-			netdev_info(ndev, "no PHY, assuming direct connection to switch\n");
+-			strscpy(mdio_bus_id, "fixed-0", MII_BUS_ID_SIZE);
+-			phy_id = 0;
++		netdev_info(ndev, "TC8: registered fixed-phy 1G/full for DSA conduit\n");
++		phy_dev = phy_connect_direct(ndev, fp, &fec_enet_adjust_link, fep->phy_interface) ? NULL : fp;
++		if (!phy_dev) {
++			netdev_err(ndev, "TC8 phy_connect_direct failed\n");
++			return -ENODEV;
+ 		}
+-
+-		snprintf(phy_name, sizeof(phy_name),
+-			 PHY_ID_FMT, mdio_bus_id, phy_id);
+-		phy_dev = phy_connect(ndev, phy_name, &fec_enet_adjust_link,
+-				      fep->phy_interface);
+ 	}
+ 
+ 	if (IS_ERR(phy_dev)) {
+-- 
+2.43.0
+
