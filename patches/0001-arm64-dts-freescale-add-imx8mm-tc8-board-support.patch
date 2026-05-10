@@ -41,7 +41,7 @@ new file mode 100644
 index 000000000..4ce5e6d1d
 --- /dev/null
 +++ b/arch/arm64/boot/dts/freescale/imx8mm-tc8.dts
-@@ -0,0 +1,468 @@
+@@ -0,0 +1,469 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +// Polycom TC8 (POLY LCC PROTO) — incremental DT on top of EVK base
 +/dts-v1/;
@@ -184,6 +184,7 @@ index 000000000..4ce5e6d1d
 +		interrupt-parent = <&gpio1>;
 +		interrupts = <9 IRQ_TYPE_EDGE_FALLING>;
 +		irq-gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;
++		reset-gpios = <&gpio2 3 GPIO_ACTIVE_LOW>;
 +		touchscreen-size-x = <800>;
 +		touchscreen-size-y = <1280>;
 +		status = "okay";
